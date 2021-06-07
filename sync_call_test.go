@@ -1,6 +1,7 @@
 package gpmd
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
@@ -30,10 +31,14 @@ func TestSyncCall(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		wg.Add(1)
 		go func(i int) {
-			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second*2)
+			defer func() {
+				wg.Done()
+				cancel()
+			}()
 			args := fmt.Sprintf("gpmd req %d", i)
 			var reply string
-			if err := client.Call("Foo.Sum", args, &reply); err != nil {
+			if err := client.Call(ctx, "Foo.Sum", args, &reply); err != nil {
 				log.Fatalln("call Foo.Sum error:", err)
 			}
 			log.Println("reply:", reply)

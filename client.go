@@ -1,6 +1,7 @@
 package gpmd
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -208,10 +209,20 @@ func (client *Client) Go(serverMethod string, args, reply interface{}, done chan
 	return call
 }
 
-//Call 同步调用
-func (client *Client) Call(serverMethod string, args, reply interface{}) error {
-	call := <-client.Go(serverMethod, args, reply, make(chan *Call, 1)).Done
-	return call.Error
+// Call 同步调用
+// 超时机制使用context来完成。使用方法如下：
+// ctx, _ := context.WithTimeout(context.Background(), time.Second)
+// var reply int
+// err := client.Call(ctx, "Foo.Sum", &Args{1, 2}, &reply)
+func (client *Client) Call(ctx context.Context, serverMethod string, args, reply interface{}) error {
+	call := client.Go(serverMethod, args, reply, make(chan *Call, 1))
+	select {
+	case <-ctx.Done():
+		client.removeCall(call.Seq)
+		return errors.New("rpc client: call failed:" + ctx.Err().Error())
+	case call := <-call.Done:
+		return call.Error
+	}
 }
 
 type clientResult struct {

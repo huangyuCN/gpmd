@@ -8,13 +8,19 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"reflect"
 	"strings"
 	"sync"
 	"time"
 )
 
-const MagicNumber = 0x1234567
+const (
+	MagicNumber      = 0x1234567
+	connected        = "200 Connected to GPMD RPC"
+	defaultRPCPath   = "/_gpmd_"
+	defaultDebugPath = "/debug/gpmd"
+)
 
 type Option struct {
 	MagicNumber    int           //MagicNumber 用来标志这是一个gpmd请求，类似erlang的session key
@@ -173,6 +179,8 @@ func (s *Server) handleRequest(cc codec.Codec, req *request, sending *sync.Mutex
 			sent <- struct{}{}
 			return
 		}
+		s.sendResponse(cc, req.h, req.replyv.Interface(), sending)
+		sent <- struct{}{}
 	}()
 	if timeout == 0 {
 		<-called
@@ -220,4 +228,30 @@ func (s *Server) findService(serviceMethod string) (svc *service, mType *methodT
 		err = errors.New("rpc server: can't find method " + methodName)
 	}
 	return
+}
+
+func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	if req.Method != "CONNECT" {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_, _ = io.WriteString(w, "405 must CONNECT\n")
+		return
+	}
+	conn, _, err := w.(http.Hijacker).Hijack()
+	if err != nil {
+		log.Println("rpc hijacking", req.RemoteAddr, ": ", err.Error())
+		return
+	}
+	_, _ = io.WriteString(conn, "HTTP/1.0 "+connected+"\n\n")
+	s.ServeConn(conn)
+}
+
+func (s *Server) HandleHTTP() {
+	http.Handle(defaultRPCPath, s)
+	http.Handle(defaultDebugPath, debugHTTP{s})
+	log.Println("rpc server debug path:", defaultDebugPath)
+}
+
+func HandleHTTP() {
+	DefaultServer.HandleHTTP()
 }
